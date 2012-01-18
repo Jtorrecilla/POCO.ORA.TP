@@ -1,4 +1,4 @@
-﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ template debug="false" hostspecific="false" language="C#" #>
 <#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.configuration.dll"#>
 <#@ import namespace="System.Linq"#>
 <#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.Data.Linq.dll"#>
@@ -17,7 +17,7 @@ namespace POCO.Ora.TP
 {
 <# 
 
-var _schemma="SIFCO";
+var _schemma="DBSchemma";
 var connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
 var tables = new List<String>();
 var constraints = new List<AuxConstraint>();

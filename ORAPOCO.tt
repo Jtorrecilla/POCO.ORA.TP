@@ -1,4 +1,5 @@
 ﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.configuration.dll"#>
 <#@ import namespace="System.Linq"#>
 <#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.Data.Linq.dll"#>
 <#@ assembly name="C:\Documents and Settings\gesein\Mis documentos\Visual Studio 2010\Projects\POCO.Ora.TP\POCO.Ora.TP\bin\Debug\Oracle.DataAccess.dll"#>
@@ -15,14 +16,17 @@ using System.Text;
 namespace POCO.Ora.TP
 {
 <# 
-var connectionString = @"Data Source = Desa10a; User Id = Sifco; Password=desarrollo";
+
+var _schemma="SIFCO";
+var connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
 var tables = new List<String>();
 var constraints = new List<AuxConstraint>();
+
 using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionString))
 {
     connection.Open();
 
-    using (var reader = new Oracle.DataAccess.Client.OracleCommand("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = 'SIFCO' AND b.CONSTRAINT_TYPE='P'",connection).ExecuteReader())
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand(String.Format("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = '{0}' AND b.CONSTRAINT_TYPE='P'",_schemma),connection).ExecuteReader())
     {
         while (reader.Read())
         {
@@ -33,7 +37,7 @@ using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionS
         }
     }
 
-    using (var reader = new Oracle.DataAccess.Client.OracleCommand("SELECT * FROM ALL_ALL_TABLES WHERE OWNER = 'SIFCO' Order By TABLE_NAME",connection).ExecuteReader())
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand(String.Format("SELECT * FROM ALL_ALL_TABLES WHERE OWNER = '{0}' Order By TABLE_NAME",_schemma),connection).ExecuteReader())
     {
         while (reader.Read())
         {

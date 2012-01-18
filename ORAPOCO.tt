@@ -1,0 +1,109 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ import namespace="System.Linq"#>
+<#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.Data.Linq.dll"#>
+<#@ assembly name="C:\Documents and Settings\gesein\Mis documentos\Visual Studio 2010\Projects\POCO.Ora.TP\POCO.Ora.TP\bin\Debug\Oracle.DataAccess.dll"#>
+<#@ import namespace="System.Collections.Generic"#>
+<#@ import namespace="Oracle"#>
+<#@ assembly name="System.Core.dll" #>
+<#@ assembly name="System.Data.dll"#>
+<#@ output extension=".cs" #>
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace POCO.Ora.TP
+{
+<# 
+var connectionString = @"Data Source = Desa10a; User Id = Sifco; Password=desarrollo";
+var tables = new List<String>();
+var constraints = new List<AuxConstraint>();
+using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionString))
+{
+    connection.Open();
+
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = 'SIFCO' AND b.CONSTRAINT_TYPE='P'",connection).ExecuteReader())
+    {
+        while (reader.Read())
+        {
+            constraints.Add(new AuxConstraint { TABLE_NAME = Convert.ToString(reader["TABLE_NAME"]),
+                                                COLUMN_NAME = Convert.ToString(reader["COLUMN_NAME"]),
+                                                POSITION = Convert.ToInt32(reader["POSITION"])    
+                                                });
+        }
+    }
+
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand("SELECT * FROM ALL_ALL_TABLES WHERE OWNER = 'SIFCO' Order By TABLE_NAME",connection).ExecuteReader())
+    {
+        while (reader.Read())
+        {
+            tables.Add(Convert.ToString(reader["TABLE_NAME"]));
+        }
+    }
+    foreach(string table in tables)
+    {
+        #>
+        <#= String.Format("public class {0}",table) #>
+        {
+            <#
+            using (var reader = new Oracle.DataAccess.Client.OracleCommand(String.Format("SELECT * FROM col WHERE TNAME = '{0}' Order by COLNO",table),connection).ExecuteReader())
+            {
+                while (reader.Read())
+                { #>
+                    <#= PKAttribute( constraints ,table,Convert.ToString(reader["CNAME"]))#>
+                    <#= String.Format(@"public {0} {1} {2}",GetPropertyType(reader),Convert.ToString(reader["CNAME"]),"{get;set;}") #>       
+                <# }
+            }
+            #>
+    
+        }
+<#
+    }
+}#>
+}
+<#+
+
+private string PKAttribute(List<AuxConstraint> keys,string table,string column)
+{
+        if (keys.Any(a=>a.TABLE_NAME == table && a.COLUMN_NAME == column))
+            return "[IsPK(true)]";
+
+    return string.Empty;
+}
+private string GetPropertyType(Oracle.DataAccess.Client.OracleDataReader row)
+{
+    string nullable = (row["NULLS"].Equals("NULL") ? "?" : "");
+	if (Convert.ToString(row["COLTYPE"]).Equals("NUMBER") || Convert.ToString(row["COLTYPE"]).Equals("LONG") || Convert.ToString(row["COLTYPE"]).Equals("INTEGER"))
+	{
+		if (Convert.ToInt16((row["SCALE"] == System.DBNull.Value ? 0 :row["SCALE"]) )>0 || Convert.ToString(row["COLTYPE"]).Equals("LONG"))
+			return String.Format("System.Decimal{0}",nullable);
+		else
+			{
+                if(row["PRECISION"]  != DBNull.Value)
+                {
+				    var val=Convert.ToInt16(Convert.ToInt16(row["PRECISION"]));
+				    if (val<=5)
+					    return String.Format("System.Int16{0}",nullable);
+				    if (val<=10)
+					    return String.Format("System.Int32{0}",nullable);
+				    if (val<=19)
+					    return String.Format("System.Int64{0}",nullable);
+                }
+			}
+        return String.Format("System.Int32{0}",nullable);
+	}
+    if (Convert.ToString(row["COLTYPE"]).Contains("LOB"))
+        return "System.Byte[]";
+	if (Convert.ToString(row["COLTYPE"]).Equals("DATE"))
+		return String.Format("System.DateTime{0}",nullable);
+	return "System.String";
+}
+ public class AuxConstraint 
+    {
+        public string TABLE_NAME { get; set; }
+        public string COLUMN_NAME { get; set; }
+        public int POSITION { get; set; }
+    }
+#>
+
+

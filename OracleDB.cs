@@ -15,7 +15,7 @@ namespace POCO.Ora.TP
         public OracleDB(string schemmaName)
         {
             _schemmaName = schemmaName;
-            _connectionString = ConfigurationManager.ConnectionStrings[ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
+            _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
         }
 
         public OracleDB(string connectionStringName, string schemmaName)

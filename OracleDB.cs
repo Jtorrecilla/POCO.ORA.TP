@@ -9,6 +9,14 @@ using System.Windows.Forms;
 
 namespace POCO.Ora.TP
 {
+
+
+    //''' Features 1.0.3
+    // 1) IsPK(bool) => IsPK()
+    // 2) SequenceAttribute
+    // 3) Recfactor
+    // 4) Avoid null values
+   
     public class OracleDB : IDisposable
     {
 
@@ -26,74 +34,56 @@ namespace POCO.Ora.TP
         private OracleConnection connection;
         private string _connectionString;
         private string _schemmaName;
+
         public void Insert<T>(T entity)
         {
             CheckConnection();
             using (var command = GetInsertCommand(entity))
             {
-                command.Connection = connection;
-                var transaction = connection.BeginTransaction();
-                try
-                {
-                    command.ExecuteNonQuery();
-                    transaction.Commit();
-                }
-                catch (OracleException ex)
-                {
-
-                    transaction.Rollback();
-                    throw ex;
-                }
+                ExecuteMethod(command);
             }
         }
+
+        
         public void Update<T>(T entity)
         {
             CheckConnection();
 
             using (var command = GetUpdateCommand(entity))
             {
-                command.Connection = connection;
-                var transaction = connection.BeginTransaction();
-                try
-                {
-                    command.ExecuteNonQuery();
-                    transaction.Commit();
-                }
-                catch (OracleException ex)
-                {
-
-                    transaction.Rollback();
-                    throw ex;
-                }
+                ExecuteMethod(command);
             }
 
         }
         public void Delete<T>(T entity)
         {
             CheckConnection();
-
-
+        
             using (var command = GetDeleteCommand(entity))
             {
-                command.Connection = connection;
-                var transaction = connection.BeginTransaction();
-                try
-                {
-                    command.ExecuteNonQuery();
-                    transaction.Commit();
-                }
-                catch (OracleException ex)
-                {
-
-                    transaction.Rollback();
-                    throw ex;
-                }
+                ExecuteMethod(command);
             }
 
         }
 
        
         #region PrivateMethods
+        private void ExecuteMethod(OracleCommand command)
+        {
+            command.Connection = connection;
+            var transaction = connection.BeginTransaction();
+            try
+            {
+                command.ExecuteNonQuery();
+                transaction.Commit();
+            }
+            catch (OracleException ex)
+            {
+
+                transaction.Rollback();
+                throw ex;
+            }
+        }
         private void CheckConnection()
         {
             if (connection == null) connection = new Oracle.DataAccess.Client.OracleConnection(_connectionString);
@@ -106,17 +96,42 @@ namespace POCO.Ora.TP
             StringBuilder builder = new StringBuilder();
             StringBuilder columns = new StringBuilder();
             StringBuilder parameters = new StringBuilder();
-
+            
             foreach (var prop in entity.GetType().GetProperties())
             {
                 columns.Append(String.Format("{0},", prop.Name));
-                parameters.Append(String.Format(":{0},", prop.Name));
-                cmd.Parameters.Add(new OracleParameter(prop.Name, prop.GetValue(entity, null)));
+               
+                var seq = prop.GetCustomAttributes(false).Where(a => a is SequenceAttribute).FirstOrDefault();
+                var defaultValue = prop.GetCustomAttributes(false).Where(a => a is DefaultValueAttribute).FirstOrDefault();
+                 if (seq!=null)
+                 {
+                     parameters.Append(String.Format("{0}.{1}.NextVal,",_schemmaName, (seq as SequenceAttribute).SequenceName));
+                 }
+                 else
+                 {
+                     if (defaultValue == null)
+                     {
+                         parameters.Append(String.Format(":{0},", prop.Name));
+                         if (prop.PropertyType.Name.StartsWith("Nullable") && prop.GetValue(entity, null) == null)
+                         {
+                             cmd.Parameters.Add(new OracleParameter(prop.Name, DBNull.Value));
+                         }
+                         else
+                         {
+                             cmd.Parameters.Add(new OracleParameter(prop.Name, prop.GetValue(entity, null)));
+                         }
+                     }
+                     else
+                     {
+                         parameters.Append(String.Format("{0},", (defaultValue as DefaultValueAttribute).Value.ToString()));
+                     }
+                 }
+                    
             }
             columns.Remove(columns.Length - 1, 1);
             parameters.Remove(parameters.Length - 1, 1);
 
-            builder.Append(String.Format("INSERT INTO {0} ({1}) VALUES ({2})", entity.GetType().Name, columns, parameters));
+            builder.Append(String.Format("INSERT INTO {0}.{1} ({2}) VALUES ({3})",_schemmaName, entity.GetType().Name, columns, parameters));
             cmd.CommandText = builder.ToString();
             return cmd;
 
@@ -136,14 +151,23 @@ namespace POCO.Ora.TP
                     where.Append(String.Format("{0} = :{0} AND", prop.Name));
                 }
                 else
+                {
                     columns.Append(String.Format("{0} = :{0},", prop.Name));
+                    if (prop.PropertyType.Name.StartsWith("Nullable") && prop.GetValue(entity, null)==null)
+                    {
+                        cmd.Parameters.Add(new OracleParameter(prop.Name, DBNull.Value));
+                    }
+                    else
+                    {
+                        cmd.Parameters.Add(new OracleParameter(prop.Name, prop.GetValue(entity, null)));
+                    }
 
-                cmd.Parameters.Add(new OracleParameter(prop.Name, prop.GetValue(entity, null)));
+                }
             }
             columns.Remove(columns.Length - 1, 1);
             where.Remove(where.Length - 3, 3);
 
-            builder.Append(String.Format("UPDATE {0} SET {1} WHERE {2}", entity.GetType().Name, columns, where));
+            builder.Append(String.Format("UPDATE {0}.{1} SET {2} WHERE {3}", _schemmaName, entity.GetType().Name, columns, where));
             cmd.CommandText = builder.ToString();
             return cmd;
 
@@ -165,7 +189,7 @@ namespace POCO.Ora.TP
             }
             where.Remove(where.Length - 3, 3);
 
-            builder.Append(String.Format("DELETE FROM {0} WHERE {1}", entity.GetType().Name, where));
+            builder.Append(String.Format("DELETE FROM {0}.{1} WHERE {2}", _schemmaName, entity.GetType().Name, where));
             cmd.CommandText = builder.ToString();
             return cmd;
 
@@ -193,7 +217,7 @@ namespace POCO.Ora.TP
             }
             if (take > 0 && skip == 0)
             {
-                builder.Append(String.Format(" WHERE r <{0}", skip));
+                builder.Append(String.Format(" WHERE r BETWEEN 1 AND {0}", take));
             }
             if (take > 0 && skip > 0)
             {

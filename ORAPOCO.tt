@@ -70,7 +70,7 @@ using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionS
 private string PKAttribute(List<AuxConstraint> keys,string table,string column)
 {
         if (keys.Any(a=>a.TABLE_NAME == table && a.COLUMN_NAME == column))
-            return "[IsPK(true)]";
+            return "[IsPK()]";
 
     return string.Empty;
 }

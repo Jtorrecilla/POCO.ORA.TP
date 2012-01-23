@@ -7,11 +7,9 @@ namespace POCO.Ora.TP
 {
     internal class IsPKAttribute : System.Attribute  
     {
-        public IsPKAttribute(bool isPK)
+        public IsPKAttribute()
         {
-            IsPK = isPK;
+           
         }
-
-        public bool IsPK { get; set; }
     }
 }

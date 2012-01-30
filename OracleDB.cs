@@ -16,60 +16,128 @@ namespace POCO.Ora.TP
     // 2) SequenceAttribute
     // 3) Recfactor
     // 4) Avoid null values
+    //''' Features 1.0.4
+    // 1) Base Type por Entities
+    // 2) UoW
    
     public class OracleDB : IDisposable
     {
-
-        public OracleDB(string schemmaName)
-        {
-            _schemmaName = schemmaName;
-            _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
-        }
-
-        public OracleDB(string connectionStringName, string schemmaName)
-        {
-            _connectionString = ConfigurationManager.ConnectionStrings[connectionStringName].ConnectionString;
-            _schemmaName = schemmaName;
-        }
         private OracleConnection connection;
         private string _connectionString;
         private string _schemmaName;
-
-        public void Insert<T>(T entity)
+        private List<Base> insertCommands;
+        private List<Base> updateCommands;
+        private List<Base> deleteCommands;
+        public OracleDB(string schemmaName,Enums.Mode connectionMode = Enums.Mode.Normal)
         {
-            CheckConnection();
+            Init(schemmaName, connectionMode);
+            _connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
+        }
+
+        private void Init(string schemmaName, Enums.Mode connectionMode)
+        {
+            _schemmaName = schemmaName;
+            ConnectionMode = connectionMode;
+            insertCommands = new List<Base>();
+            updateCommands = new List<Base>();
+            deleteCommands = new List<Base>();
+        }
+
+        public OracleDB(string connectionStringName, string schemmaName, Enums.Mode connectionMode = Enums.Mode.Normal)
+        {
+
+             Init(schemmaName, connectionMode);
+            _connectionString = ConfigurationManager.ConnectionStrings[connectionStringName].ConnectionString;
+        }
+
+        public void Insert<T>(T entity) where T : Base 
+        {
             using (var command = GetInsertCommand(entity))
             {
                 ExecuteMethod(command);
             }
         }
 
-        
-        public void Update<T>(T entity)
-        {
-            CheckConnection();
 
+        public void Update<T>(T entity) where T : Base 
+        {
             using (var command = GetUpdateCommand(entity))
             {
                 ExecuteMethod(command);
             }
-
         }
-        public void Delete<T>(T entity)
+        public void Delete<T>(T entity) where T : Base 
         {
-            CheckConnection();
-        
             using (var command = GetDeleteCommand(entity))
             {
                 ExecuteMethod(command);
             }
-
+        }
+        public void Save()
+        {
+            if (ConnectionMode == Enums.Mode.UnitOfWork)
+            {
+                CheckConnection();
+                var transaction = connection.BeginTransaction();
+                try
+                {
+                    ExecuteInserts();
+                    ExecuteUpdates();
+                    ExecuteDeletes();
+                    ClearCommands();
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                    throw ex;
+                } 
+            }
+               
         }
 
+        private void ClearCommands()
+        {
+            insertCommands.Clear();
+            updateCommands.Clear();
+            deleteCommands.Clear();
+        }
+
+        private void ExecuteDeletes()
+        {
+            foreach (var element in deleteCommands)
+            {
+                OracleCommand command = GetInsertCommand(element);
+                command.Connection = connection;
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private void ExecuteUpdates()
+        {
+            foreach (var element in updateCommands)
+            {
+                OracleCommand command = GetInsertCommand(element);
+                command.Connection = connection;
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private void ExecuteInserts()
+        {
+            foreach (var element in insertCommands)
+            {
+                 OracleCommand command = GetInsertCommand(element);
+                command.Connection = connection;
+                command.ExecuteNonQuery();
+            }
+        }
        
         #region PrivateMethods
         private void ExecuteMethod(OracleCommand command)
         {
+            if (ConnectionMode == Enums.Mode.UnitOfWork) return;
+            CheckConnection();
             command.Connection = connection;
             var transaction = connection.BeginTransaction();
             try
@@ -92,6 +160,12 @@ namespace POCO.Ora.TP
         }
         private OracleCommand GetInsertCommand(object entity)
         {
+            if (ConnectionMode == Enums.Mode.UnitOfWork && !insertCommands.Where(a => a.Equals(entity)).Any())
+            {
+                insertCommands.Add((Base)entity);
+                return null;
+            }
+
             OracleCommand cmd = new OracleCommand();
             StringBuilder builder = new StringBuilder();
             StringBuilder columns = new StringBuilder();
@@ -139,6 +213,11 @@ namespace POCO.Ora.TP
 
         private OracleCommand GetUpdateCommand(object entity)
         {
+            if (ConnectionMode == Enums.Mode.UnitOfWork && !insertCommands.Where(a => a.Equals(entity)).Any())
+            {
+                updateCommands.Add((Base)entity);
+                return null;
+            }
             OracleCommand cmd = new OracleCommand();
             StringBuilder builder = new StringBuilder();
             StringBuilder columns = new StringBuilder();
@@ -175,6 +254,11 @@ namespace POCO.Ora.TP
 
         private OracleCommand GetDeleteCommand(object entity)
         {
+            if (ConnectionMode == Enums.Mode.UnitOfWork && !insertCommands.Where(a => a.Equals(entity)).Any())
+            {
+                deleteCommands.Add((Base)entity);
+                return null;
+            }
             OracleCommand cmd = new OracleCommand();
             StringBuilder builder = new StringBuilder();
             StringBuilder where = new StringBuilder();
@@ -194,7 +278,7 @@ namespace POCO.Ora.TP
             return cmd;
 
         }
-        private OracleCommand GetQueryCommand<T>(string columns, long take, long skip,string order, string where, object[] args)
+        private OracleCommand GetQueryCommand<T>(string columns, long take, long skip, string order, string where, object[] args) where T : Base 
         {
             var command = new OracleCommand(GetQueryText<T>(columns, take, skip,order, where, args), connection);
             if (args != null)
@@ -206,7 +290,7 @@ namespace POCO.Ora.TP
             }
             return command;
         }
-        private string GetQueryText<T>(string columns, long take, long skip,string order, string where, object[] args)
+        private string GetQueryText<T>(string columns, long take, long skip,string order, string where, object[] args) where T : Base
         {
             StringBuilder builder = new StringBuilder();
             builder.Append(String.Format("SELECT {1} FROM (select row_number() over (order by 1 DESC) r,{2}.{1} from  {0}.{2})", _schemmaName, columns, typeof(T).Name));
@@ -237,7 +321,7 @@ namespace POCO.Ora.TP
             }
             return builder.ToString();
         }
-        private static void FetchReader<T>(List<T> lista, OracleDataReader reader)
+        private static void FetchReader<T>(List<T> lista, OracleDataReader reader) where T : Base 
         {
             var converter = new TypeConverter();
             while (reader.Read())
@@ -273,16 +357,21 @@ namespace POCO.Ora.TP
         #endregion
 
         #region QueryMethods
-        
-        public Tuple<IEnumerable<T1>, IEnumerable<T2>> MultipleQuery<T1, T2>()
+
+        public Tuple<IEnumerable<T1>, IEnumerable<T2>> MultipleQuery<T1, T2>() 
+            where T1 : Base 
+            where T2 : Base
         {
             return new Tuple<IEnumerable<T1>, IEnumerable<T2>>(QueryAll<T1>(), QueryAll<T2>());
         }
-        public Tuple<IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>> MultipleQuery<T1, T2,T3>()
+        public Tuple<IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>> MultipleQuery<T1, T2, T3>()
+            where T1 : Base
+            where T2 : Base
+            where T3 : Base 
         {
-            return new Tuple<IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>>(QueryAll<T1>(), QueryAll<T2>(), QueryAll<T3>());
+            return new Tuple<IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>>(QueryAll<T1>(), QueryAll<T2>(), QueryAll<T3>()); 
         }
-        public IEnumerable<T> Query<T>(string columns = "*", long take = 0, long skip = 0,string order = "", string where = "", object[] args = null)
+        public IEnumerable<T> Query<T>(string columns = "*", long take = 0, long skip = 0, string order = "", string where = "", object[] args = null) where T : Base 
         {
             List<T> lista = new List<T>();
             if (string.IsNullOrWhiteSpace(columns)) columns = "*";
@@ -296,8 +385,8 @@ namespace POCO.Ora.TP
             return lista;
         }
 
-        
-        public IEnumerable<T> QueryAll<T>()
+
+        public IEnumerable<T> QueryAll<T>() where T : Base 
         {
 
             List<T> lista = new List<T>();
@@ -324,6 +413,8 @@ namespace POCO.Ora.TP
         }
 
         #endregion
+
+        public Enums.Mode ConnectionMode { get; set; }
     }
 }
 

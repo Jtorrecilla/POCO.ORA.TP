@@ -1,5 +1,4 @@
-<#@ template debug="false" hostspecific="false" language="C#" #>
-<#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.configuration.dll"#>
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
 <#@ import namespace="System.Linq"#>
 <#@ assembly name="C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\System.Data.Linq.dll"#>
 <#@ assembly name="C:\Documents and Settings\gesein\Mis documentos\Visual Studio 2010\Projects\POCO.Ora.TP\POCO.Ora.TP\bin\Debug\Oracle.DataAccess.dll"#>
@@ -12,21 +11,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-
+using System.ComponentModel;
 namespace POCO.Ora.TP
 {
 <# 
-
 var _schemma="DBSchemma";
 var connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
 var tables = new List<String>();
 var constraints = new List<AuxConstraint>();
-
 using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionString))
 {
     connection.Open();
 
-    using (var reader = new Oracle.DataAccess.Client.OracleCommand(String.Format("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = '{0}' AND b.CONSTRAINT_TYPE='P'",_schemma),connection).ExecuteReader())
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = 'SIFCO' AND b.CONSTRAINT_TYPE='P'",connection).ExecuteReader())
     {
         while (reader.Read())
         {
@@ -47,14 +44,15 @@ using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionS
     foreach(string table in tables)
     {
         #>
-        <#= String.Format("public class {0}",table) #>
+        <#= String.Format("public class {0} : Base",table) #>
         {
             <#
-            using (var reader = new Oracle.DataAccess.Client.OracleCommand(String.Format("SELECT * FROM col WHERE TNAME = '{0}' Order by COLNO",table),connection).ExecuteReader())
+            using (var reader = new Oracle.DataAccess.Client.OracleCommand{ CommandText = String.Format("SELECT * FROM col WHERE TNAME = '{0}' Order by COLNO",table), Connection = connection, InitialLONGFetchSize= -1}.ExecuteReader())
             {
                 while (reader.Read())
                 { #>
                     <#= PKAttribute( constraints ,table,Convert.ToString(reader["CNAME"]))#>
+                    <#= GetDefaultValue(reader) #>
                     <#= String.Format(@"public {0} {1} {2}",GetPropertyType(reader),Convert.ToString(reader["CNAME"]),"{get;set;}") #>       
                 <# }
             }
@@ -73,6 +71,13 @@ private string PKAttribute(List<AuxConstraint> keys,string table,string column)
             return "[IsPK()]";
 
     return string.Empty;
+}
+private string GetDefaultValue(Oracle.DataAccess.Client.OracleDataReader row)
+{
+    var defaultValue = Convert.ToString(row["DEFAULTVAL"]).Trim();
+    if (string.IsNullOrWhiteSpace(defaultValue))
+        return string.Empty;
+    return String.Format("[DefaultValue(\"{0}\")]",defaultValue);
 }
 private string GetPropertyType(Oracle.DataAccess.Client.OracleDataReader row)
 {
@@ -96,6 +101,8 @@ private string GetPropertyType(Oracle.DataAccess.Client.OracleDataReader row)
 			}
         return String.Format("System.Int32{0}",nullable);
 	}
+    if (Convert.ToString(row["COLTYPE"]).Contains("RAW"))
+        return "System.Guid";
     if (Convert.ToString(row["COLTYPE"]).Contains("LOB"))
         return "System.Byte[]";
 	if (Convert.ToString(row["COLTYPE"]).Equals("DATE"))

@@ -4,6 +4,7 @@
 <#@ assembly name="C:\Documents and Settings\gesein\Mis documentos\Visual Studio 2010\Projects\POCO.Ora.TP\POCO.Ora.TP\bin\Debug\Oracle.DataAccess.dll"#>
 <#@ import namespace="System.Collections.Generic"#>
 <#@ import namespace="Oracle"#>
+<#@ assembly name="Microsoft.CSharp" #>
 <#@ assembly name="System.Core.dll" #>
 <#@ assembly name="System.Data.dll"#>
 <#@ output extension=".cs" #>
@@ -11,19 +12,20 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.ComponentModel;
+using POCO.Ora.TP.GenericMapping;
 namespace POCO.Ora.TP
 {
 <# 
-var _schemma="DBSchemma";
-var connectionString = System.Configuration.ConfigurationManager.ConnectionStrings[System.Configuration.ConfigurationManager.ConnectionStrings.Count - 1].ConnectionString;
+var _schemma = "SIFCO";
+var connectionString = @"Data Source = Desa10a; User Id = Sifco; Password=desarrollo";
 var tables = new List<String>();
+var columnas = new List<dynamic>();
 var constraints = new List<AuxConstraint>();
 using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionString))
 {
     connection.Open();
 
-    using (var reader = new Oracle.DataAccess.Client.OracleCommand("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = 'SIFCO' AND b.CONSTRAINT_TYPE='P'",connection).ExecuteReader())
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand(String.Format("SELECT a.* FROM ALL_CONS_COLUMNS a INNER JOIN ALL_CONSTRAINTS b ON a.CONSTRAINT_NAME = b.CONSTRAINT_NAME WHERE A.OWNER = '{0}' AND b.CONSTRAINT_TYPE='P'",_schemma),connection).ExecuteReader())
     {
         while (reader.Read())
         {
@@ -41,24 +43,68 @@ using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionS
             tables.Add(Convert.ToString(reader["TABLE_NAME"]));
         }
     }
+
+    using (var reader = new Oracle.DataAccess.Client.OracleCommand{ CommandText = String.Format("SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE,DATA_LENGTH,DATA_PRECISION,DATA_SCALE,NULLABLE,COLUMN_ID,DATA_DEFAULT FROM all_tab_cols where owner='{0}'",_schemma), Connection = connection, InitialLONGFetchSize= -1 }.ExecuteReader())
+    {
+        while (reader.Read())
+        {
+            columnas.Add(new { 
+                              TABLE_NAME = Convert.ToString(reader["TABLE_NAME"]),
+                              COLUMN_NAME = Convert.ToString(reader["COLUMN_NAME"]),
+                              DATA_TYPE = Convert.ToString(reader["DATA_TYPE"]),  
+                              DATA_LENGTH = Convert.ToString(reader["DATA_LENGTH"]),
+                              DATA_PRECISION = Convert.ToString(reader["DATA_PRECISION"]),
+                              DATA_SCALE = Convert.ToString(reader["DATA_SCALE"]),
+                              NULLABLE = Convert.ToString(reader["NULLABLE"]),
+                              COLUMN_ID = Convert.ToString(reader["COLUMN_ID"]),
+                              DATA_DEFAULT = Convert.ToString(reader["DATA_DEFAULT"])
+                              });
+        }
+    }
     foreach(string table in tables)
     {
         #>
-        <#= String.Format("public class {0} : Base",table) #>
+        <#= String.Format("public class {0}",table) #>
         {
             <#
-            using (var reader = new Oracle.DataAccess.Client.OracleCommand{ CommandText = String.Format("SELECT * FROM col WHERE TNAME = '{0}' Order by COLNO",table), Connection = connection, InitialLONGFetchSize= -1}.ExecuteReader())
-            {
-                while (reader.Read())
-                { #>
-                    <#= PKAttribute( constraints ,table,Convert.ToString(reader["CNAME"]))#>
-                    <#= GetDefaultValue(reader) #>
-                    <#= String.Format(@"public {0} {1} {2}",GetPropertyType(reader),Convert.ToString(reader["CNAME"]),"{get;set;}") #>       
-                <# }
-            }
+            foreach(var column in columnas.Where(col=>col.TABLE_NAME==table).OrderBy(col=>col.COLUMN_ID).ToList())
+            { #>
+                <#= String.Format(@"public {0} {1} {2}",GetPropertyType(column),column.COLUMN_NAME,"{get;set;}") #>
+           <#  }
+           
             #>
-    
         }
+    <#= String.Format("public class {0}Mapper : GenericMapper<{0}>",table) #>
+    {
+        public Type GetMappedType()
+            {
+                return typeof(<#= table #>);
+            }
+        <#= String.Format("public {0}Mapper() : base()",table) #>
+        {
+            
+             <#
+            foreach(var column in columnas.Where(col=>col.TABLE_NAME==table).OrderBy(col=>col.COLUMN_ID).ToList())
+            { #>
+                    <#= MapColumn(column) #>
+                    <#
+                    var pk = PKAttribute( constraints ,table,Convert.ToString(column.COLUMN_NAME));
+                    var def = GetDefaultValue(column);
+                    var nullable = GetNullable(column);
+                    if (!string.IsNullOrWhiteSpace(pk))
+                    {  #><#= pk #>
+                    <#}
+                    if (!string.IsNullOrWhiteSpace(def))
+                    {  #><#= def #>
+                    <#}
+                    if (!string.IsNullOrWhiteSpace(nullable))
+                    {  #><#= nullable #>
+                    <#}
+#>
+           <#  }
+            #>
+        }
+    }
 <#
     }
 }#>
@@ -68,29 +114,22 @@ using(var connection = new Oracle.DataAccess.Client.OracleConnection(connectionS
 private string PKAttribute(List<AuxConstraint> keys,string table,string column)
 {
         if (keys.Any(a=>a.TABLE_NAME == table && a.COLUMN_NAME == column))
-            return "[IsPK()]";
+            return String.Format("SetPrimaryKeyField(x => x.{0});",column);
 
     return string.Empty;
 }
-private string GetDefaultValue(Oracle.DataAccess.Client.OracleDataReader row)
+private string GetPropertyType(dynamic row)
 {
-    var defaultValue = Convert.ToString(row["DEFAULTVAL"]).Trim();
-    if (string.IsNullOrWhiteSpace(defaultValue))
-        return string.Empty;
-    return String.Format("[DefaultValue(\"{0}\")]",defaultValue);
-}
-private string GetPropertyType(Oracle.DataAccess.Client.OracleDataReader row)
-{
-    string nullable = (row["NULLS"].Equals("NULL") ? "?" : "");
-	if (Convert.ToString(row["COLTYPE"]).Equals("NUMBER") || Convert.ToString(row["COLTYPE"]).Equals("LONG") || Convert.ToString(row["COLTYPE"]).Equals("INTEGER"))
+    string nullable = (Convert.ToString(row.NULLABLE).Equals("Y") ? "?" : "");
+	if (Convert.ToString(row.DATA_TYPE).Equals("NUMBER") || Convert.ToString(row.DATA_TYPE).Equals("LONG") || Convert.ToString(row.DATA_TYPE).Equals("INTEGER"))
 	{
-		if (Convert.ToInt16((row["SCALE"] == System.DBNull.Value ? 0 :row["SCALE"]) )>0 || Convert.ToString(row["COLTYPE"]).Equals("LONG"))
+		if (Convert.ToInt16((string.IsNullOrWhiteSpace(Convert.ToString(row.DATA_SCALE))? 0 :row.DATA_SCALE) )>0 || Convert.ToString(row.DATA_TYPE).Equals("LONG"))
 			return String.Format("System.Decimal{0}",nullable);
 		else
 			{
-                if(row["PRECISION"]  != DBNull.Value)
+                if(!String.IsNullOrWhiteSpace(row.DATA_PRECISION))
                 {
-				    var val=Convert.ToInt16(Convert.ToInt16(row["PRECISION"]));
+				    var val=Convert.ToInt16(Convert.ToInt16(row.DATA_PRECISION));
 				    if (val<=5)
 					    return String.Format("System.Int16{0}",nullable);
 				    if (val<=10)
@@ -101,14 +140,34 @@ private string GetPropertyType(Oracle.DataAccess.Client.OracleDataReader row)
 			}
         return String.Format("System.Int32{0}",nullable);
 	}
-    if (Convert.ToString(row["COLTYPE"]).Contains("RAW"))
+    if (Convert.ToString(row.DATA_TYPE).Contains("RAW"))
         return "System.Guid";
-    if (Convert.ToString(row["COLTYPE"]).Contains("LOB"))
+    if (Convert.ToString(row.DATA_TYPE).Contains("LOB"))
         return "System.Byte[]";
-	if (Convert.ToString(row["COLTYPE"]).Equals("DATE"))
+	if (Convert.ToString(row.DATA_TYPE).Equals("DATE"))
 		return String.Format("System.DateTime{0}",nullable);
 	return "System.String";
 }
+private string GetDefaultValue(dynamic row)
+{
+    var defaultValue = Convert.ToString(row.DATA_DEFAULT).Trim();
+    if (string.IsNullOrWhiteSpace(defaultValue))
+        return string.Empty;
+    return String.Format("SetDefaultValue(x => x.{0}, \"{1}\");",row.COLUMN_NAME,defaultValue);
+}
+private string GetNullable(dynamic row)
+{
+    var nullable = (Convert.ToString(row.NULLABLE).Equals("Y") ? true : false);
+    if (nullable)
+        return String.Format("SetNullable(x=> x.{0});",row.COLUMN_NAME);
+    return string.Empty;
+}
+
+private string MapColumn(dynamic row)
+{
+    return String.Format("AddColumnMapping(x=> x.{0});",row.COLUMN_NAME);
+}
+
  public class AuxConstraint 
     {
         public string TABLE_NAME { get; set; }
@@ -116,5 +175,3 @@ private string GetPropertyType(Oracle.DataAccess.Client.OracleDataReader row)
         public int POSITION { get; set; }
     }
 #>
-
-

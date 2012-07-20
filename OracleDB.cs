@@ -1,15 +1,15 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Configuration;
 using Oracle.DataAccess.Client;
 using System.ComponentModel;
+using System.Windows.Forms;
 using System.Reflection;
 using System.Linq.Expressions;
 using System.Data;
 using POCO.Ora.TP.GenericMapping;
-using POCO.Ora.TP.Extensions;
 
 namespace POCO.Ora.TP
 {
@@ -114,13 +114,9 @@ namespace POCO.Ora.TP
         {
             foreach (var element in deleteCommands)
             {
-                var mapper = GetMapper(element.GetType());
-
-                using (var command = (mapper.Value != null ? GetMapppedDeleteCommand(element, mapper) : GetDeleteCommand(element)))
-                {
-                    command.Connection = connection;
-                    command.ExecuteNonQuery();
-                }
+                //OracleCommand command = GetMappedInsertCommand(element);
+                //command.Connection = connection;
+                //command.ExecuteNonQuery();
             }
         }
 
@@ -176,7 +172,6 @@ namespace POCO.Ora.TP
             if (connection == null) connection = new Oracle.DataAccess.Client.OracleConnection(_connectionString);
             if (connection.State != System.Data.ConnectionState.Open)
                 connection.Open();
-            
         }
         private OracleCommand GetInsertCommand(object entity)
         {
@@ -481,12 +476,12 @@ namespace POCO.Ora.TP
             }
             return builder.ToString();
         }
-        private static void FetchReader<T>(List<T> lista, OracleDataReader reader) where T : new()
+        private static void FetchReader<T>(List<T> lista, OracleDataReader reader) 
         {
             var converter = new TypeConverter();
             while (reader.Read())
             {
-               var dato = new T();
+                var dato = typeof(T).GetConstructor(new Type[0]).Invoke(new object[0]);
                 foreach (var prop in dato.GetType().GetProperties())
                 {
                     if (reader.GetSchemaTable().Rows.Cast<DataRow>().Where(a => a.Field<string>("COLUMNNAME").Equals(prop.Name)).Any())
@@ -520,22 +515,17 @@ namespace POCO.Ora.TP
 
         #region QueryMethods
 
-        public Tuple<IEnumerable<T1>, IEnumerable<T2>> MultipleQuery<T1, T2>() where T1 : new() where T2 : new()
-       
+        public Tuple<IEnumerable<T1>, IEnumerable<T2>> MultipleQuery<T1, T2>()
         {
             return new Tuple<IEnumerable<T1>, IEnumerable<T2>>(QueryAll<T1>(), QueryAll<T2>());
         }
         public Tuple<IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>> MultipleQuery<T1, T2, T3>()
-            where T1 : new()
-            where T2 : new()
-            where T3 : new()
-            
         {
             return new Tuple<IEnumerable<T1>, IEnumerable<T2>, IEnumerable<T3>>(QueryAll<T1>(), QueryAll<T2>(), QueryAll<T3>());
         }
         //Expression<Func<T, object>> property
 
-        public IEnumerable<T> Query<T>(Expression<Func<T, object>> columns = null, Expression<Func<T, object>> order = null, long take = 0, long skip = 0, Expression<Func<T, object>> where = null, object[] args = null) where T : new()
+        public IEnumerable<T> Query<T>(Expression<Func<T, object>> columns = null, Expression<Func<T, object>> order = null, long take = 0, long skip = 0, Expression<Func<T, object>>  where = null, object[] args = null)
         {
             List<object> parameters = new List<object>();
             List<T> lista = new List<T>();
@@ -688,13 +678,14 @@ namespace POCO.Ora.TP
             }
         }
 
-        private IEnumerable<T> Query<T>(string columns = "*", long take = 0, long skip = 0, string order = "", string where = "", object[] args = null) where T : new()
+        private IEnumerable<T> Query<T>(string columns = "*", long take = 0, long skip = 0, string order = "", string where = "", object[] args = null)
         {
             List<T> lista = new List<T>();
             if (string.IsNullOrWhiteSpace(columns)) columns = "*";
             CheckConnection();
             using (var reader = GetQueryCommand<T>(columns, take, skip, order, where, args).ExecuteReader())
             {
+
                 FetchReader<T>(lista, reader);
             }
 
@@ -702,7 +693,7 @@ namespace POCO.Ora.TP
         }
 
 
-        public IEnumerable<T> QueryAll<T>() where T : new ()
+        public IEnumerable<T> QueryAll<T>() 
         {
 
             List<T> lista = new List<T>();
@@ -763,21 +754,6 @@ namespace POCO.Ora.TP
         }
 
 
-        public void BulkInsert<T>(IList<T> rows)
-        {
-            if (!rows.Any()) return;
-            CheckConnection();
-            using (OracleBulkCopy bulkCopy = new OracleBulkCopy(this.connection))
-            {
-
-                DataTable dt = rows.GetTable<T>(GetMapper(typeof(T)).Key);
-
-                bulkCopy.DestinationTableName = typeof(T).Name;
-
-                bulkCopy.WriteToServer(dt);
-            }
-        }
     }
-
 }
 
